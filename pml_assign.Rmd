@@ -1,0 +1,172 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Jason Brant"
+date: "March 20, 2016"
+output: html_document
+---
+
+This document describes the creation of a machine learning model to predict the class of weight lifting activities. 
+
+#Background:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+This project will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly (A) and incorrectly in 4 different ways (B, C, D, E).
+
+
+Load required packages:
+
+```{r}
+library("dplyr")
+library("tidyr")
+library("caret")
+library("randomForest")
+```
+
+
+##Data 
+
+Data was downloaded from the following URLs and stored locally: 
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The following code was used to load the data into R.  The data was explored (full extent beyond the scope of this report) reulting in the NA designations included.
+
+```{r}
+#Set working directory where data files are stored
+setwd("~/Documents/Coursera/Practical Machine Learning")
+
+#Load in training and test sets
+final.testing <- read.csv('testing.csv',, na.strings = c('#DIV/0!', 'NA', ''))
+training <- read.csv('training.csv', na.strings = c('#DIV/0!', 'NA', ''))
+```
+
+The dataset that will be used as a final test is termed 'final.testing' and contains `r nrow(final.testing)` rows and `r ncol(final.testing)` columns.
+
+The dataset that will be used for training is termned 'training' and contains `r nrow(training)` rows and `r ncol(training)` columns.
+
+
+##Data partitioning and cleaning 
+
+Varaibles were first included only if they provided measured information. 
+
+
+```{r}
+#Data Cleaning
+#Remove irrelevant columns and put 'classe' as first column
+training <- training %>%
+        select(classe, roll_belt:magnet_forearm_z)
+
+final.testing <- final.testing %>%
+        select(problem_id, roll_belt:magnet_forearm_z)
+```
+
+This left `r ncol(training)` and `r ncol(final.testing)` columns (or variables) for the training and final testing sets, respectively. 
+
+For reproducibility:
+
+```{r}
+set.seed(2222)
+```
+
+The provided training set was partitioned 80/20 in order to provide training and test sets.
+
+```{r}
+#Partition the training set 
+inTrain <- createDataPartition(y = training$classe,
+                               p = 0.8,
+                               list = FALSE)
+
+train <- training[inTrain, ]
+test <- training[-inTrain, ]
+```
+
+Variables were removed if they had near zero variance, or had >50% missing data.
+
+```{r}
+#Remove near zero variance variables
+
+#Test for near zero variance
+nzVars <- as.data.frame(nearZeroVar(train, saveMetrics = TRUE))
+
+#Copy names of variables into new column
+nzVars$VarName <- rownames(nzVars)
+
+#Choose only variables that were TRUE for near zero variance
+remove.vars <- nzVars %>%
+        filter(nzv == TRUE)
+
+#Remove variables from the training set determined to be near zero variance
+train <- train %>%
+        select(-c(one_of(remove.vars$VarName)))
+
+#Remove the same columns from the testing set, and the final testing set
+test <- test %>%
+        select(-c(one_of(remove.vars$VarName)))
+
+final.testing <- final.testing %>%
+        select(-c(one_of(remove.vars$VarName)))
+
+
+
+#Remove columns with more than 50% NAs
+train.na <- as.data.frame(apply(train, 2, function(x) sum(is.na(x))/nrow(train)))
+
+#Rename column from above apply function as per.missin (percent missing)
+colnames(train.na) <- c('per.missing')
+
+#Copy variables names to a new column
+train.na$VarName <- rownames(train.na)
+
+#Select only variables with more than 50% missing data
+train.na <- train.na %>%
+        filter(per.missing > 0.5)
+
+#Remove selected variables from the training set
+train <- train %>%
+        select(-c(one_of(train.na$VarName)))
+
+#Remove the same columns from the testing and final testing sets
+test <- test %>%
+        select(-c(one_of(train.na$VarName)))
+
+final.testing <- final.testing %>%
+        select(-c(one_of(train.na$VarName)))
+```
+
+This resulted in `r ncol(train)`, `r ncol(test)`, and `r ncol(final.testing)` columns (or variables) for the training, testing, and final test sets, respectively. 
+
+#Modeling
+
+Due to the large number of variables in the dataset (even after the above reductions), preprocessing was performed with principle component analysis.  These new variables accounted for 95% of the variance and were used to build a random forrest model. This model was then used to predict the activities from the testing portion of the data.
+
+```{r, cache=TRUE}
+#Pre-process the data with priciple component analysis to reduce variables
+
+modelFit <- train(train$classe ~ ., 
+                  method = 'rf', 
+                  preProcess = 'pca',
+                  data = train)
+pred <- predict(modelFit, test)
+```
+
+The final model was tested against the 'test' subset of the training data with the following results:
+
+```{r}
+confusionMatrix(pred, test$classe)
+```
+
+These results were determined to be acceptable and the model was applied against the actual testing set (in this case named 'final.testing'). The list below is the predictions for the 20 cases presented
+
+```{r}
+pred.final  <- as.data.frame(predict(modelFit, final.testing))
+colnames(pred.final) <- c('Predicted Activity')
+```
+
+Data for this project was provided by http://groupware.les.inf.puc-rio.br/har.
